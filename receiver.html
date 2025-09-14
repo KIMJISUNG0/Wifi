@@ -2,34 +2,54 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Receiver</title>
+  <title>📥 Receiver</title>
 </head>
 <body>
   <h1>📥 Receiver</h1>
   <p>연결 상태: <span id="status">연결 안됨</span></p>
-  <h3>받은 메시지:</h3>
-  <ul id="messages"></ul>
+  <h3>받은 사진:</h3>
+  <img id="preview" style="max-width:100%; display:none;">
+  <a id="download" style="display:none;">⬇️ 다운로드</a>
 
   <script>
     const WS_URL = "wss://spring-salad-09fe.slvjek.workers.dev";
-    let ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(WS_URL);
 
-    ws.onopen = () => {
-      document.getElementById('status').innerText = "✅ 연결됨";
-    };
+    let meta = null;
+    let chunks = [];
 
-    ws.onclose = () => {
-      document.getElementById('status').innerText = "❌ 끊김";
-    };
+    ws.onopen = () => { document.getElementById('status').innerText = "✅ 연결됨"; };
+    ws.onclose = () => { document.getElementById('status').innerText = "❌ 끊김"; };
 
     ws.onmessage = (event) => {
-      let li = document.createElement("li");
-      li.innerText = event.data;
-      document.getElementById('messages').appendChild(li);
-    };
+      if (typeof event.data === "string") {
+        // 메타 정보 수신
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "meta") {
+            meta = msg;
+            chunks = [];
+          }
+        } catch {}
+      } else {
+        // 파일 데이터 수신
+        chunks.push(event.data);
+        if (meta) {
+          const blob = new Blob(chunks, { type: meta.mime });
+          const url = URL.createObjectURL(blob);
 
-    ws.onerror = (err) => {
-      console.error("WebSocket Error:", err);
+          // 화면 표시
+          const img = document.getElementById('preview');
+          img.src = url;
+          img.style.display = "block";
+
+          // 다운로드 링크 제공
+          const a = document.getElementById('download');
+          a.href = url;
+          a.download = meta.name;
+          a.style.display = "inline-block";
+        }
+      }
     };
   </script>
 </body>
