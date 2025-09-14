@@ -1,54 +1,63 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>📥 Receiver</title>
+  <style>
+    body{font-family:system-ui;margin:16px}
+    #preview{max-width:100%;display:none;border:1px solid #ddd;padding:8px;border-radius:8px}
+    #download{display:none;margin-top:8px}
+  </style>
 </head>
 <body>
   <h1>📥 Receiver</h1>
-  <p>연결 상태: <span id="status">연결 안됨</span></p>
-  <h3>받은 사진:</h3>
-  <img id="preview" style="max-width:100%; display:none;">
-  <a id="download" style="display:none;">⬇️ 다운로드</a>
+  연결 상태: <b id="status">연결 안됨</b>
+
+  <h3 style="margin-top:16px">받은 사진</h3>
+  <img id="preview" alt="수신 미리보기">
+  <p><a id="download">⬇️ 다운로드</a></p>
 
   <script>
     const WS_URL = "wss://spring-salad-09fe.slvjek.workers.dev";
     const ws = new WebSocket(WS_URL);
+    const $ = id => document.getElementById(id);
 
     let meta = null;
     let chunks = [];
 
-    ws.onopen = () => { document.getElementById('status').innerText = "✅ 연결됨"; };
-    ws.onclose = () => { document.getElementById('status').innerText = "❌ 끊김"; };
+    ws.onopen  = () => { $('status').textContent = '✅ 연결됨'; };
+    ws.onclose = () => { $('status').textContent = '❌ 끊김';   };
+    ws.onerror = (e) => console.error('WS error:', e);
 
-    ws.onmessage = (event) => {
-      if (typeof event.data === "string") {
-        // 메타 정보 수신
+    ws.onmessage = (evt) => {
+      // 문자열이면 메타 정보일 가능성
+      if (typeof evt.data === 'string') {
         try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "meta") {
+          const msg = JSON.parse(evt.data);
+          if (msg?.type === 'meta') {
             meta = msg;
             chunks = [];
           }
-        } catch {}
-      } else {
-        // 파일 데이터 수신
-        chunks.push(event.data);
-        if (meta) {
-          const blob = new Blob(chunks, { type: meta.mime });
-          const url = URL.createObjectURL(blob);
+        } catch { /* 무시(텍스트 메시지일 수 있음) */ }
+        return;
+      }
 
-          // 화면 표시
-          const img = document.getElementById('preview');
-          img.src = url;
-          img.style.display = "block";
+      // 바이너리(Blob/ArrayBuffer) 수신
+      chunks.push(evt.data);
 
-          // 다운로드 링크 제공
-          const a = document.getElementById('download');
-          a.href = url;
-          a.download = meta.name;
-          a.style.display = "inline-block";
-        }
+      // 단순 버전: 메타가 있으면 바로 조립
+      if (meta) {
+        const blob = new Blob(chunks, { type: meta.mime || 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+
+        // 미리보기/다운로드
+        const img = $('preview');
+        img.src = url; img.style.display = 'block';
+
+        const a = $('download');
+        a.href = url;
+        a.download = meta.name || 'received';
+        a.style.display = 'inline-block';
       }
     };
   </script>
