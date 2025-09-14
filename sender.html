@@ -2,40 +2,34 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Sender</title>
+  <title>📤 Sender</title>
 </head>
 <body>
   <h1>📤 Sender</h1>
-  <input id="msg" placeholder="메시지를 입력하세요" style="width:300px">
-  <button onclick="sendMsg()">Send</button>
-
+  <input type="file" id="fileInput" accept="image/*">
+  <button id="sendBtn">사진 전송</button>
   <p>연결 상태: <span id="status">연결 안됨</span></p>
 
   <script>
     const WS_URL = "wss://spring-salad-09fe.slvjek.workers.dev";
-    let ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(WS_URL);
 
-    ws.onopen = () => {
-      document.getElementById('status').innerText = "✅ 연결됨";
+    ws.onopen = () => { document.getElementById('status').innerText = "✅ 연결됨"; };
+    ws.onclose = () => { document.getElementById('status').innerText = "❌ 끊김"; };
+
+    document.getElementById('sendBtn').onclick = async () => {
+      const file = document.getElementById('fileInput').files[0];
+      if (!file) return alert("사진을 선택하세요!");
+
+      // 파일 정보 먼저 전송
+      ws.send(JSON.stringify({ type: "meta", name: file.name, mime: file.type }));
+
+      // 실제 파일 내용 전송
+      const arrayBuffer = await file.arrayBuffer();
+      ws.send(arrayBuffer);
+
+      alert("사진 전송 완료!");
     };
-
-    ws.onclose = () => {
-      document.getElementById('status').innerText = "❌ 끊김";
-    };
-
-    ws.onerror = (err) => {
-      console.error("WebSocket Error:", err);
-    };
-
-    function sendMsg() {
-      let text = document.getElementById('msg').value;
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(text);
-        console.log("보냄:", text);
-      } else {
-        alert("연결이 안되어 있습니다!");
-      }
-    }
   </script>
 </body>
 </html>
