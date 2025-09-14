@@ -1,56 +1,35 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>📥 Receiver</title>
+  <title>Receiver</title>
 </head>
 <body>
-  <h2>📥 Receiver</h2>
-  <p>Status: <span id="status">Waiting...</span></p>
-  <a id="downloadLink" style="display:none">Download File</a>
+  <h1>📥 Receiver</h1>
+  <p>연결 상태: <span id="status">연결 안됨</span></p>
+  <h3>받은 메시지:</h3>
+  <ul id="messages"></ul>
 
   <script>
     const WS_URL = "wss://spring-salad-09fe.slvjek.workers.dev";
-    const room = "testRoom";   // Sender와 동일한 방 이름
-    const role = "receiver";
+    let ws = new WebSocket(WS_URL);
 
-    const ws = new WebSocket(`${WS_URL}?room=${room}&role=${role}`);
-    const pc = new RTCPeerConnection();
-    let fileName = "";
-
-    pc.ondatachannel = e => {
-      const channel = e.channel;
-      channel.onopen = () => document.getElementById("status").textContent = "Connected ✅";
-      channel.onmessage = e => {
-        if (typeof e.data === "string") {
-          fileName = e.data;
-        } else {
-          const blob = new Blob([e.data]);
-          const link = document.getElementById("downloadLink");
-          link.href = URL.createObjectURL(blob);
-          link.download = fileName || "downloaded.bin";
-          link.style.display = "block";
-          link.textContent = `⬇️ Download ${fileName}`;
-        }
-      };
+    ws.onopen = () => {
+      document.getElementById('status').innerText = "✅ 연결됨";
     };
 
-    pc.onicecandidate = e => {
-      if (e.candidate) {
-        ws.send(JSON.stringify({ type: "candidate", candidate: e.candidate }));
-      }
+    ws.onclose = () => {
+      document.getElementById('status').innerText = "❌ 끊김";
     };
 
-    ws.onmessage = async e => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "offer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ type: "answer", answer }));
-      } else if (msg.type === "candidate") {
-        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-      }
+    ws.onmessage = (event) => {
+      let li = document.createElement("li");
+      li.innerText = event.data;
+      document.getElementById('messages').appendChild(li);
+    };
+
+    ws.onerror = (err) => {
+      console.error("WebSocket Error:", err);
     };
   </script>
 </body>
