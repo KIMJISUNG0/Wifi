@@ -7,69 +7,95 @@
   textarea{width:100%;height:120px}
   .card{border:1px solid #ddd;border-radius:12px;padding:12px;margin:12px 0}
 </style>
+
 <h2>📤 Sender</h2>
+
 <div class="card">
   <p>1) 전송할 사진 선택</p>
   <input id="file" type="file" accept="image/*">
   <p id="fileInfo"></p>
 </div>
+
 <div class="card">
-  <p>2) Offer 생성 → 아래 텍스트를 복사해서 Receiver에 붙여넣기</p>
+  <p>2) Offer 생성 → 아래 텍스트를 Receiver에 전달</p>
   <button id="makeOffer">Offer 만들기</button>
+  <button id="copyOffer">📋 Offer 복사</button>
   <textarea id="offerOut" readonly></textarea>
 </div>
+
 <div class="card">
-  <p>3) Receiver의 Answer를 아래에 붙여넣고 “Answer 적용”</p>
+  <p>3) Receiver의 Answer를 붙여넣고 적용</p>
   <textarea id="answerIn" placeholder="여기에 Answer JSON 붙여넣기"></textarea>
   <button id="applyAnswer">Answer 적용</button>
   <p id="status">상태: 대기</p>
 </div>
+
 <div class="card">
-  <p>4) 연결되면 “사진 전송”</p>
+  <p>4) 연결되면 사진 전송</p>
   <button id="sendBtn" disabled>사진 전송</button>
 </div>
+
 <script>
 const pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
 const channel = pc.createDataChannel('file');
 let fileBuf = null;
+
 const $ = id => document.getElementById(id);
+
 $('file').onchange = async e => {
   const f = e.target.files?.[0];
   if(!f){ $('fileInfo').textContent = '선택된 파일 없음'; return; }
   $('fileInfo').textContent = `${f.name} (${f.size} bytes)`;
   fileBuf = await f.arrayBuffer();
 };
+
 channel.binaryType = 'arraybuffer';
 channel.onopen = () => { $('status').textContent = '상태: 연결됨'; $('sendBtn').disabled=false; };
 channel.onclose = () => { $('status').textContent = '상태: 연결 종료'; $('sendBtn').disabled=true; };
+
 function waitIceComplete(){
   return new Promise(res=>{
     if(pc.iceGatheringState==='complete') return res();
     const chk=()=> pc.iceGatheringState==='complete' && (pc.removeEventListener('icegatheringstatechange',chk),res());
     pc.addEventListener('icegatheringstatechange',chk);
-    setTimeout(res,1500);
+    setTimeout(res,1500); // 백업 타임아웃
   });
 }
+
 $('makeOffer').onclick = async () => {
   await pc.setLocalDescription(await pc.createOffer());
   await waitIceComplete();
   $('offerOut').value = JSON.stringify(pc.localDescription);
 };
+
+$('copyOffer').onclick = () => {
+  const text = $('offerOut').value;
+  if (!text) { alert('복사할 Offer가 없습니다'); return; }
+  navigator.clipboard.writeText(text)
+    .then(()=>alert('Offer가 복사되었습니다!'))
+    .catch(err=>alert('복사 실패: ' + err));
+};
+
 $('applyAnswer').onclick = async () => {
   try{
-    const ans = JSON.parse(($('answerIn').value||'').trim());
+    const ansText = ($('answerIn').value||'').trim();
+    if(!ansText){ alert('Answer를 붙여넣어 주세요'); return; }
+    const ans = JSON.parse(ansText);
     await pc.setRemoteDescription(ans);
     $('status').textContent='상태: Answer 적용됨, 연결 대기';
   }catch(e){ alert('Answer 적용 오류: '+e); }
 };
+
 $('sendBtn').onclick = async () => {
   if(!fileBuf){ alert('사진을 먼저 선택하세요'); return; }
-  const meta = {type:'meta', filename: $('file').files[0].name, size: fileBuf.byteLength, mime: $('file').files[0].type || 'image/jpeg'};
+  const f = $('file').files[0];
+  const meta = {type:'meta', filename: f.name, size: fileBuf.byteLength, mime: f.type || 'image/jpeg'};
   channel.send(JSON.stringify(meta));
+
   const chunkSize = 64*1024;
   for(let i=0;i<fileBuf.byteLength;i+=chunkSize){
     channel.send(fileBuf.slice(i, i+chunkSize));
-    await new Promise(r=>setTimeout(r,2));
+    await new Promise(r=>setTimeout(r,2)); // 혼잡 완화
   }
   channel.send(JSON.stringify({type:'end'}));
   alert('전송 완료!');
