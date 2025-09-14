@@ -8,25 +8,33 @@
   .card{border:1px solid #ddd;border-radius:12px;padding:12px;margin:12px 0}
   img{max-width:100%}
 </style>
+
 <h2>📥 Receiver</h2>
+
 <div class="card">
-  <p>1) Sender가 만든 Offer 텍스트를 붙여넣고 “Answer 생성”</p>
+  <p>1) Sender가 만든 Offer 텍스트를 붙여넣고 Answer 생성</p>
   <textarea id="offerIn" placeholder="여기에 Offer JSON 붙여넣기"></textarea>
   <button id="makeAnswer">Answer 생성</button>
 </div>
+
 <div class="card">
-  <p>2) 생성된 Answer를 복사해서 Sender에 붙여넣기</p>
+  <p>2) 생성된 Answer를 Sender에 전달</p>
+  <button id="copyAnswer">📋 Answer 복사</button>
   <textarea id="answerOut" readonly></textarea>
   <p id="status">상태: 대기</p>
 </div>
+
 <div class="card">
   <p>3) 수신 미리보기 & 저장</p>
   <img id="preview" />
   <a id="saveLink" download style="display:none">📥 다운로드</a>
 </div>
+
 <script>
 const pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-let bufs = []; let meta = null;
+let bufs = [];
+let meta = null;
+
 pc.ondatachannel = ev => {
   const ch = ev.channel;
   ch.binaryType = 'arraybuffer';
@@ -35,8 +43,10 @@ pc.ondatachannel = ev => {
     if (typeof evt.data === 'string'){
       try{
         const msg = JSON.parse(evt.data);
-        if(msg.type==='meta'){ meta = msg; bufs=[]; $('status').textContent=`수신 중: ${meta.filename} (${meta.size} bytes)`; }
-        else if(msg.type==='end'){
+        if(msg.type==='meta'){
+          meta = msg; bufs=[];
+          $('status').textContent=`수신 중: ${meta.filename} (${meta.size} bytes)`;
+        } else if(msg.type==='end'){
           const blob = new Blob(bufs,{type: meta?.mime || 'application/octet-stream'});
           const url = URL.createObjectURL(blob);
           $('preview').src = url;
@@ -46,13 +56,15 @@ pc.ondatachannel = ev => {
           a.style.display='inline-block';
           $('status').textContent='상태: 수신 완료';
         }
-      }catch{/* ignore */}
+      }catch{/* 문자열이지만 JSON 아님 */}
     }else{
       bufs.push(evt.data);
     }
   };
 };
+
 function $(id){ return document.getElementById(id); }
+
 function waitIceComplete(){
   return new Promise(res=>{
     if(pc.iceGatheringState==='complete') return res();
@@ -61,14 +73,25 @@ function waitIceComplete(){
     setTimeout(res,1500);
   });
 }
+
 $('makeAnswer').onclick = async () => {
   try{
-    const offer = JSON.parse(($('offerIn').value||'').trim());
+    const offerText = ($('offerIn').value||'').trim();
+    if(!offerText){ alert('Offer를 붙여넣어 주세요'); return; }
+    const offer = JSON.parse(offerText);
     await pc.setRemoteDescription(offer);
     await pc.setLocalDescription(await pc.createAnswer());
     await waitIceComplete();
     $('answerOut').value = JSON.stringify(pc.localDescription);
     $('status').textContent='상태: Answer 생성됨 (Sender에 붙여넣기)';
   }catch(e){ alert('Answer 생성 오류: '+e); }
+};
+
+$('copyAnswer').onclick = () => {
+  const text = $('answerOut').value;
+  if (!text) { alert('복사할 Answer가 없습니다'); return; }
+  navigator.clipboard.writeText(text)
+    .then(()=>alert('Answer가 복사되었습니다!'))
+    .catch(err=>alert('복사 실패: ' + err));
 };
 </script>
