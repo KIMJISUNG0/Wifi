@@ -1,57 +1,41 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>📤 Sender</title>
+  <title>Sender</title>
 </head>
 <body>
-  <h2>📤 Sender</h2>
-  <input type="file" id="fileInput">
-  <button id="sendBtn">Send File</button>
-  <p>Status: <span id="status">Waiting...</span></p>
+  <h1>📤 Sender</h1>
+  <input id="msg" placeholder="메시지를 입력하세요" style="width:300px">
+  <button onclick="sendMsg()">Send</button>
+
+  <p>연결 상태: <span id="status">연결 안됨</span></p>
 
   <script>
     const WS_URL = "wss://spring-salad-09fe.slvjek.workers.dev";
-    const room = "testRoom";   // 방 이름 (같게 맞추면 자동 연결)
-    const role = "sender";
+    let ws = new WebSocket(WS_URL);
 
-    const ws = new WebSocket(`${WS_URL}?room=${room}&role=${role}`);
-    const pc = new RTCPeerConnection();
+    ws.onopen = () => {
+      document.getElementById('status').innerText = "✅ 연결됨";
+    };
 
-    let dataChannel = pc.createDataChannel("fileTransfer");
-    dataChannel.onopen = () => document.getElementById("status").textContent = "Connected ✅";
-    dataChannel.onmessage = e => console.log("Receiver says:", e.data);
+    ws.onclose = () => {
+      document.getElementById('status').innerText = "❌ 끊김";
+    };
 
-    pc.onicecandidate = e => {
-      if (e.candidate) {
-        ws.send(JSON.stringify({ type: "candidate", candidate: e.candidate }));
+    ws.onerror = (err) => {
+      console.error("WebSocket Error:", err);
+    };
+
+    function sendMsg() {
+      let text = document.getElementById('msg').value;
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(text);
+        console.log("보냄:", text);
+      } else {
+        alert("연결이 안되어 있습니다!");
       }
-    };
-
-    ws.onmessage = async e => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "answer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
-      } else if (msg.type === "candidate") {
-        await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-      }
-    };
-
-    document.getElementById("sendBtn").onclick = async () => {
-      const file = document.getElementById("fileInput").files[0];
-      if (!file) return alert("No file selected!");
-      dataChannel.send(file.name); // 파일명 먼저 전송
-      const arrayBuffer = await file.arrayBuffer();
-      dataChannel.send(arrayBuffer);
-      alert("File sent!");
-    };
-
-    async function start() {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.onopen = () => ws.send(JSON.stringify({ type: "offer", offer }));
     }
-    start();
   </script>
 </body>
 </html>
