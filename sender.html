@@ -1,34 +1,56 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>📤 Sender</title>
+  <style>
+    body{font-family:system-ui;margin:16px}
+    .row{margin:12px 0}
+    #preview{max-width:100%;display:none;border:1px solid #ddd;padding:8px;border-radius:8px}
+  </style>
 </head>
 <body>
   <h1>📤 Sender</h1>
-  <input type="file" id="fileInput" accept="image/*">
-  <button id="sendBtn">사진 전송</button>
-  <p>연결 상태: <span id="status">연결 안됨</span></p>
+
+  <div class="row">
+    연결 상태: <b id="status">연결 안됨</b>
+  </div>
+
+  <div class="row">
+    <input type="file" id="fileInput" accept="image/*">
+    <button id="sendFileBtn">사진 전송</button>
+  </div>
+
+  <img id="preview" alt="미리보기"/>
 
   <script>
+    // 반드시 본인 워커 주소 확인
     const WS_URL = "wss://spring-salad-09fe.slvjek.workers.dev";
+
     const ws = new WebSocket(WS_URL);
+    const $ = id => document.getElementById(id);
 
-    ws.onopen = () => { document.getElementById('status').innerText = "✅ 연결됨"; };
-    ws.onclose = () => { document.getElementById('status').innerText = "❌ 끊김"; };
+    ws.onopen  = () => { $('status').textContent = '✅ 연결됨'; };
+    ws.onclose = () => { $('status').textContent = '❌ 끊김';   };
+    ws.onerror = (e) => console.error('WS error:', e);
 
-    document.getElementById('sendBtn').onclick = async () => {
-      const file = document.getElementById('fileInput').files[0];
-      if (!file) return alert("사진을 선택하세요!");
+    $('sendFileBtn').onclick = async () => {
+      const file = $('fileInput').files?.[0];
+      if (!file) { alert('사진을 선택하세요!'); return; }
+      if (ws.readyState !== WebSocket.OPEN) { alert('웹소켓이 연결되지 않았습니다.'); return; }
 
-      // 파일 정보 먼저 전송
-      ws.send(JSON.stringify({ type: "meta", name: file.name, mime: file.type }));
+      // 미리보기
+      const url = URL.createObjectURL(file);
+      $('preview').src = url; $('preview').style.display = 'block';
 
-      // 실제 파일 내용 전송
-      const arrayBuffer = await file.arrayBuffer();
-      ws.send(arrayBuffer);
+      // 1) 파일 메타 먼저 전송
+      ws.send(JSON.stringify({ type: 'meta', name: file.name, mime: file.type, size: file.size }));
 
-      alert("사진 전송 완료!");
+      // 2) 파일 내용 전송 (작은 파일: 한 번에)
+      const buf = await file.arrayBuffer();
+      ws.send(buf);
+
+      alert('사진 전송 완료!');
     };
   </script>
 </body>
