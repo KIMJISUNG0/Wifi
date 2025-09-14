@@ -1,0 +1,109 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>📥 P2P Receiver</title>
+<style>
+  :root{--bg:#0f172a;--card:#111827;--fg:#e5e7eb;--muted:#9ca3af;--acc:#22c55e;--br:18px}
+  *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#0b1220,#0f172a);}
+  .wrap{max-width:900px;margin:0 auto;padding:24px;color:var(--fg);font-family:ui-sans-serif,system-ui,Apple SD Gothic Neo,Segoe UI,Roboto,Arial}
+  .hero{display:flex;gap:16px;align-items:center;margin-bottom:18px}
+  .badge{padding:6px 10px;border-radius:999px;background:#1f2937;color:#93c5fd;border:1px solid #60a5fa33;font-weight:600}
+  .card{background:linear-gradient(180deg,#0f172a,#0b1220);border:1px solid #1f2937;border-radius:var(--br);padding:20px;margin:14px 0;box-shadow:0 10px 25px #0006}
+  .status{font-weight:600}
+  .status.ok{color:#34d399}.status.warn{color:#f59e0b}.status.err{color:#ef4444}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .item{border:1px solid #1f2937;border-radius:14px;overflow:hidden;background:#0b1324}
+  .thumb{aspect-ratio:1/1;width:100%;object-fit:cover;display:block}
+  .meta{padding:10px}
+  .name{margin:0 0 6px;font-weight:600}
+  .muted{color:#9ca3af;font-size:13px}
+  .btn{display:inline-block;margin-top:8px;padding:8px 12px;border:1px solid #334155;border-radius:10px;background:#0b1324;color:#e5e7eb;text-decoration:none}
+</style>
+
+<div class="wrap">
+  <div class="hero">
+    <span class="badge">P2P • Receiver</span>
+    <div class="status" id="stat">대기…</div>
+  </div>
+
+  <div class="card">
+    <p class="muted">같은 <code>?room=ABC</code> 로 Sender와 접속하면 자동 연결됩니다.</p>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<script>
+const qs = new URLSearchParams(location.search);
+const room = qs.get('room') || 'test';
+const WS_URL = `wss://spring-salad-09fe.slvjek.workers.dev/p2p/${encodeURIComponent(room)}`;
+const iceServers = [{urls:'stun:stun.l.google.com:19302'}];
+
+const $ = s=>document.querySelector(s);
+const stat = $('#stat'); const grid = $('#grid');
+
+let meta=null, chunks=[];
+
+function setStatus(t,cls='ok'){ stat.textContent=t; stat.className='status '+cls; }
+
+const ws = new WebSocket(WS_URL);
+ws.onopen = ()=> setStatus('신호 연결됨 • P2P 협상 대기','warn');
+
+const pc = new RTCPeerConnection({iceServers});
+pc.onicecandidate = (e)=>{ if(e.candidate) ws?.send(JSON.stringify({type:'ice', candidate:e.candidate})); };
+
+ws.onmessage = async (e)=>{
+  const msg = JSON.parse(e.data);
+  if(msg.type==='offer'){
+    await pc.setRemoteDescription(new RTCSessionDescription(msg));
+    const answer = await pc.createAnswer(); await pc.setLocalDescription(answer);
+    ws.send(JSON.stringify(answer)); // {type:'answer', sdp:...}
+  } else if(msg.type==='ice'){
+    try{ await pc.addIceCandidate(msg.candidate); }catch{}
+  }
+};
+
+pc.ondatachannel = (ev)=>{
+  const dc = ev.channel;
+  dc.binaryType = 'arraybuffer';
+  dc.onopen = ()=> setStatus('P2P 연결됨 • 수신 중','ok');
+  dc.onclose= ()=> setStatus('P2P 끊김','err');
+
+  dc.onmessage = async (evt)=>{
+    if(typeof evt.data === 'string'){
+      try{
+        const j = JSON.parse(evt.data);
+        if(j.type==='meta'){ meta=j; chunks=[]; return; }
+        if(j.type==='eof'){ assemble(); return; }
+      }catch{}
+      return;
+    }
+    // 바이너리
+    let buf = evt.data;
+    if (buf instanceof Blob) buf = await buf.arrayBuffer();
+    chunks.push(buf);
+  };
+};
+
+function assemble(){
+  const blob = new Blob(chunks, {type: meta?.mime || 'application/octet-stream'});
+  const url = URL.createObjectURL(blob);
+  const name = meta?.name || 'received';
+
+  const card = document.createElement('div');
+  card.className='item';
+  const img = document.createElement('img');
+  img.className='thumb'; img.src = url; img.alt = name;
+  const metaBox = document.createElement('div'); metaBox.className='meta';
+  const title = document.createElement('p'); title.className='name'; title.textContent = name;
+  const small = document.createElement('p'); small.className='muted'; small.textContent = (meta.size? (meta.size/1024).toFixed(1)+' KB • ':'') + (meta.mime||'');
+  const a = document.createElement('a'); a.className='btn'; a.href=url; a.download=name; a.textContent='⬇️ 다운로드';
+
+  metaBox.appendChild(title); metaBox.appendChild(small); metaBox.appendChild(a);
+  card.appendChild(img); card.appendChild(metaBox);
+  grid.prepend(card);
+
+  setStatus('수신 완료 (대기 중)','ok');
+  meta=null; chunks=[];
+}
+</script>
