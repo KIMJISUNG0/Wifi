@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>P2P Receiver</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#121a2b; --muted:#9fb1d1; --text:#e8f0ff; --accent:#5dd0ff; --ok:#36d399; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 10% -10%, #10223b 0%, #0b1220 60%), var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Apple SD Gothic Neo, "Noto Sans KR", Arial;}
+  .wrap{max-width:960px;margin:40px auto;padding:24px}
+  .card{background:linear-gradient(180deg, #121a2b 0%, #0f1727 100%); border:1px solid rgba(255,255,255,.08); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.35); padding:24px}
+  h1{margin:0 0 16px; font-size:28px}
+  .row{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px}
+  .col{background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:16px}
+  .label{font-size:12px; color:var(--muted); margin-bottom:8px}
+  input[type="text"], textarea{width:100%; background:#0e1626; color:var(--text); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:10px 12px; outline:none}
+  textarea{min-height:140px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size:12px; line-height:1.4; resize:vertical}
+  .btns{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+  button{background:#1a2438; color:var(--text); border:1px solid rgba(255,255,255,.15); border-radius:10px; padding:10px 14px; cursor:pointer}
+  button.primary{background:linear-gradient(90deg, #2aa9ff, #5dd0ff); color:#021524; border:0}
+  button.ok{background:#1b2b24; border-color:#1f5a46; color:#a2ffdc}
+  .badge{font-size:12px; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.18); background:#10192a; display:inline-block}
+  .log{margin-top:16px; background:#0c1424; border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:10px; height:130px; overflow:auto; font-family:ui-monospace; font-size:12px}
+  .downloads a{display:block; color:#a2ffdc; text-decoration:none; margin:6px 0}
+  @media (max-width:900px){ .row{grid-template-columns:1fr} .wrap{padding:16px; margin:20px auto}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>📥 P2P Receiver</h1>
+
+      <div class="badge" id="iceState">ICE: -</div>
+      <div class="badge" id="dcState">DC: -</div>
+
+      <div class="row">
+        <div class="col">
+          <div class="label">🔐 암호키 (Sender와 동일한 키)</div>
+          <div class="btns">
+            <input id="keyInput" type="text" placeholder="Sender와 동일 키 입력" />
+            <button id="copyKey">복사</button>
+          </div>
+
+          <div style="height:8px"></div>
+          <div class="label">받은 파일</div>
+          <div class="downloads" id="downloads"></div>
+
+          <div class="log" id="log"></div>
+        </div>
+
+        <div class="col">
+          <div class="label">1) Sender의 Offer JSON을 아래에 붙여넣고 “Answer 만들기”</div>
+          <div class="btns">
+            <button id="pasteOffer">붙여넣기</button>
+            <button id="makeAnswer" class="primary">Answer 만들기</button>
+          </div>
+          <textarea id="offerIn" placeholder="여기에 Offer JSON 붙여넣기"></textarea>
+
+          <div style="height:12px"></div>
+          <div class="label">2) 생성된 Answer JSON을 Sender에 전달</div>
+          <div class="btns">
+            <button id="copyAnswer">복사</button>
+          </div>
+          <textarea id="answerOut" placeholder="생성된 Answer JSON"></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const logBox = $("#log");
+const log = (m)=>{ const t=document.createElement("div"); t.textContent=m; logBox.appendChild(t); logBox.scrollTop=logBox.scrollHeight; };
+
+const iceState = $("#iceState");
+const dcState  = $("#dcState");
+const keyInput = $("#keyInput");
+$("#copyKey").onclick = ()=> navigator.clipboard.writeText(keyInput.value||"");
+
+const pasteOffer = $("#pasteOffer");
+const makeAnswer = $("#makeAnswer");
+const offerIn = $("#offerIn");
+const copyAnswer = $("#copyAnswer");
+const answerOut = $("#answerOut");
+const downloads = $("#downloads");
+
+let pc, dc;
+let expecting = null;        // {name, mime, encSize, salt, iv, chunks:[]}
+let cryptoKey = null;
+
+const b64 = arrbuf => btoa(String.fromCharCode(...new Uint8Array(arrbuf)));
+const ub64 = b64str => Uint8Array.from(atob(b64str), c => c.charCodeAt(0)).buffer;
+
+async function deriveKey(pass, salt){
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    {name:"PBKDF2", salt, iterations:100000, hash:"SHA-256"},
+    {name:"AES-GCM", length:256},
+    false, ["decrypt"]
+  );
+}
+
+function createPeer(){
+  pc = new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+  pc.onicegatheringstatechange = ()=> { iceState.textContent = "ICE: "+pc.iceGatheringState; };
+  pc.ondatachannel = (ev)=>{
+    dc = ev.channel;
+    hookDataChannel(dc);
+  };
+  return pc;
+}
+
+function hookDataChannel(ch){
+  ch.onopen  = ()=>{ dcState.textContent="DC: open"; log("✅ 데이터채널 OPEN"); };
+  ch.onclose = ()=>{ dcState.textContent="DC: closed"; log("❌ 데이터채널 CLOSED"); };
+  ch.onmessage = async (ev)=>{
+    const data = ev.data;
+    if (typeof data === "string"){
+      try{
+        const msg = JSON.parse(data);
+        if(msg.type==="file-meta"){
+          expecting = { name:msg.name, mime:msg.mime, encSize:msg.encSize, salt:msg.salt, iv:msg.iv, chunks:[], received:0 };
+          log(`📦 메타 수신: ${msg.name} (${msg.encSize} encrypted bytes)`);
+        }else if(msg.type==="file-end"){
+          await finalizeFile();
+        }
+      }catch{}
+    }else{
+      // chunk
+      if(!expecting){ log("⚠️ 메타 없이 바이너리 수신"); return; }
+      let buf = data instanceof Blob ? await data.arrayBuffer() : data;
+      expecting.chunks.push(new Uint8Array(buf));
+      expecting.received += buf.byteLength;
+    }
+  };
+}
+
+async function finalizeFile(){
+  const {name, mime, encSize, salt, iv, chunks} = expecting;
+  const pass = keyInput.value.trim();
+  if(!pass){ alert("암호키를 입력하세요."); return; }
+
+  // join chunks
+  const out = new Uint8Array(encSize);
+  let off = 0;
+  for(const c of chunks){ out.set(c, off); off += c.length; }
+
+  // derive & decrypt
+  cryptoKey = await deriveKey(pass, new Uint8Array(ub64(salt)));
+  const plain = await crypto.subtle.decrypt({name:"AES-GCM", iv:new Uint8Array(ub64(iv))}, cryptoKey, out.buffer);
+
+  const blob = new Blob([plain], {type: mime || "application/octet-stream"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.textContent = `⬇️ 다운로드: ${name}`;
+  downloads.appendChild(a);
+
+  log(`✅ 복호화 완료 & 다운로드 준비: ${name}`);
+  expecting = null;
+}
+
+// ---------- offer/answer ----------
+pasteOffer.onclick = async ()=>{
+  try{
+    const t = await navigator.clipboard.readText();
+    offerIn.value = t;
+  }catch{ alert("클립보드 접근이 허용되지 않았습니다."); }
+};
+
+makeAnswer.onclick = async ()=>{
+  if(!keyInput.value){ alert("먼저 암호키를 입력하세요."); return; }
+  if(!offerIn.value)  { alert("Offer JSON을 붙여넣으세요."); return; }
+
+  createPeer();
+  await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(offerIn.value)));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  log("📄 Answer 생성… ICE 후보 수집 대기");
+
+  // wait ICE complete
+  if(pc.iceGatheringState!=="complete"){
+    await new Promise(res=>{
+      pc.onicegatheringstatechange = ()=>{
+        iceState.textContent = "ICE: "+pc.iceGatheringState;
+        if(pc.iceGatheringState==="complete") res();
+      };
+    });
+  }
+  answerOut.value = JSON.stringify(pc.localDescription);
+  log("✅ Answer 준비 완료. Sender에 전달하세요.");
+};
+
+copyAnswer.onclick = ()=> navigator.clipboard.writeText(answerOut.value||"");
+</script>
+</body>
+</html>
