@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>P2P Sender</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#121a2b; --muted:#9fb1d1; --text:#e8f0ff; --accent:#5dd0ff; --ok:#36d399; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 10% -10%, #10223b 0%, #0b1220 60%), var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Apple SD Gothic Neo, "Noto Sans KR", Arial;}
+  .wrap{max-width:960px;margin:40px auto;padding:24px}
+  .card{background:linear-gradient(180deg, #121a2b 0%, #0f1727 100%); border:1px solid rgba(255,255,255,.08); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.35); padding:24px}
+  h1{margin:0 0 16px; font-size:28px; letter-spacing:.2px}
+  .row{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px}
+  .col{background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:16px}
+  .label{font-size:12px; color:var(--muted); margin-bottom:8px}
+  input[type="text"], textarea{width:100%; background:#0e1626; color:var(--text); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:10px 12px; outline:none}
+  textarea{min-height:140px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size:12px; line-height:1.4; resize:vertical}
+  .btns{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+  button{background:#1a2438; color:var(--text); border:1px solid rgba(255,255,255,.15); border-radius:10px; padding:10px 14px; cursor:pointer}
+  button.primary{background:linear-gradient(90deg, #2aa9ff, #5dd0ff); color:#021524; border:0}
+  button.ok{background:#1b2b24; border-color:#1f5a46; color:#a2ffdc}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  .status{display:flex; gap:8px; flex-wrap:wrap}
+  .badge{font-size:12px; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.18); background:#10192a}
+  .ok{color:#a2ffdc; border-color:#1f5a46; background:#0f1f1a}
+  .warn{color:#ffd79a; border-color:#6b5325; background:#1d1609}
+  .err{color:#ffb3b3; border-color:#6b2a2a; background:#1d0f0f}
+  .muted{color:var(--muted)}
+  .center{display:flex; align-items:center; gap:8px}
+  .filebox{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .log{margin-top:16px; background:#0c1424; border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:10px; height:130px; overflow:auto; font-family:ui-monospace; font-size:12px}
+  @media (max-width:900px){ .row{grid-template-columns:1fr} .wrap{padding:16px; margin:20px auto}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>📤 P2P Sender</h1>
+
+      <div class="status">
+        <div class="badge" id="iceState">ICE: -</div>
+        <div class="badge" id="dcState">DC: -</div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <div class="label">🔐 암호키 (같은 키를 양쪽 모두 사용)</div>
+          <div class="btns">
+            <input id="keyInput" type="text" placeholder="예: 1Y28D-9QWZK-..." />
+            <button id="genKey">키 생성</button>
+            <button id="copyKey">복사</button>
+          </div>
+
+          <div style="height:8px"></div>
+          <div class="label">📁 파일 선택 (여러 개 가능)</div>
+          <div class="filebox">
+            <input id="fileInput" type="file" multiple />
+            <button id="sendBtn" class="primary" disabled>파일 전송</button>
+          </div>
+
+          <div class="log" id="log"></div>
+        </div>
+
+        <div class="col">
+          <div class="label">1) Offer 만들기 → 아래 JSON을 Receiver에 붙여넣기</div>
+          <div class="btns">
+            <button id="makeOffer" class="primary">Offer 만들기</button>
+            <button id="copyOffer">복사</button>
+          </div>
+          <textarea id="offerOut" placeholder="생성된 Offer JSON"></textarea>
+
+          <div style="height:12px"></div>
+          <div class="label">2) Receiver가 준 Answer JSON 붙여넣기 → “Answer 적용”</div>
+          <div class="btns">
+            <button id="pasteAnswer">붙여넣기</button>
+            <button id="applyAnswer" class="ok">Answer 적용</button>
+          </div>
+          <textarea id="answerIn" placeholder="여기에 Answer JSON 붙여넣기"></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const logBox = $("#log");
+const log = (m)=>{ const t=document.createElement("div"); t.textContent=m; logBox.appendChild(t); logBox.scrollTop=logBox.scrollHeight; };
+
+const iceState = $("#iceState");
+const dcState  = $("#dcState");
+const keyInput = $("#keyInput");
+const genKey   = $("#genKey");
+const copyKey  = $("#copyKey");
+
+const fileInput= $("#fileInput");
+const sendBtn  = $("#sendBtn");
+
+const makeOffer= $("#makeOffer");
+const offerOut = $("#offerOut");
+const copyOffer= $("#copyOffer");
+
+const pasteAnswer=$("#pasteAnswer");
+const applyAnswer=$("#applyAnswer");
+const answerIn = $("#answerIn");
+
+let pc, dc;               // RTCPeerConnection & DataChannel
+let cryptoKey = null;     // AES-GCM key derived from passphrase
+
+// ---------- helpers ----------
+const b64 = arrbuf => btoa(String.fromCharCode(...new Uint8Array(arrbuf)));
+const ub64 = b64str => Uint8Array.from(atob(b64str), c => c.charCodeAt(0)).buffer;
+
+async function deriveKey(pass, salt){
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    {name:"PBKDF2", salt, iterations:100000, hash:"SHA-256"},
+    base,
+    {name:"AES-GCM", length:256},
+    false, ["encrypt","decrypt"]
+  );
+}
+
+function genPass(){
+  const dict="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out="";
+  for(let i=0;i<16;i++) out += dict[Math.floor(Math.random()*dict.length)];
+  return out.replace(/(.{4})/g,"$1-").replace(/-$/,"");
+}
+
+// ---------- UI: key ----------
+genKey.onclick = ()=>{
+  keyInput.value = genPass();
+};
+copyKey.onclick = ()=>{
+  navigator.clipboard.writeText(keyInput.value||"");
+};
+
+// ---------- WebRTC setup ----------
+function createPeer(){
+  pc = new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+  pc.onicegatheringstatechange = ()=> { iceState.textContent = "ICE: "+pc.iceGatheringState; };
+  pc.onconnectionstatechange  = ()=> { log("PC: "+pc.connectionState); };
+  dc = pc.createDataChannel("files",{ordered:true});
+  hookDataChannel(dc);
+  return pc;
+}
+
+function hookDataChannel(ch){
+  ch.onopen  = ()=>{ dcState.textContent="DC: open"; sendBtn.disabled=false; log("✅ 데이터채널 OPEN"); };
+  ch.onclose = ()=>{ dcState.textContent="DC: closed"; sendBtn.disabled=true; log("❌ 데이터채널 CLOSED"); };
+  ch.onerror = (e)=> log("DC error: "+e.message);
+}
+
+// wait for ICE complete (no trickle, 수동 JSON 교환에 안정적)
+function waitIceComplete(pc){
+  if(pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise(res=>{
+    pc.onicegatheringstatechange = ()=>{
+      iceState.textContent = "ICE: "+pc.iceGatheringState;
+      if(pc.iceGatheringState === "complete") res();
+    };
+  });
+}
+
+// ---------- offer / answer ----------
+makeOffer.onclick = async ()=>{
+  if(!keyInput.value){ alert("먼저 암호키를 입력/생성하세요."); return; }
+
+  // 새 PeerConnection
+  createPeer();
+
+  // local desc
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  log("📄 Offer 생성… ICE 후보 수집 대기");
+
+  // ICE complete 후 내보낼 JSON
+  await waitIceComplete(pc);
+  offerOut.value = JSON.stringify(pc.localDescription);
+  log("✅ Offer 준비 완료. Receiver에 전달하세요.");
+};
+
+copyOffer.onclick = ()=> navigator.clipboard.writeText(offerOut.value||"");
+
+pasteAnswer.onclick = async ()=>{
+  try{
+    const text = await navigator.clipboard.readText();
+    answerIn.value = text;
+  }catch(e){
+    alert("클립보드 접근이 허용되지 않았습니다.");
+  }
+};
+
+applyAnswer.onclick = async ()=>{
+  if(!answerIn.value) return alert("Answer JSON을 붙여넣으세요.");
+  await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(answerIn.value)));
+  log("🔗 Answer 적용 완료. 연결을 기다립니다…");
+};
+
+// ---------- encrypt & send ----------
+async function encryptAndSendFile(file){
+  // 파라미터 준비
+  const pass = keyInput.value.trim();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  cryptoKey = await deriveKey(pass, salt);
+
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plain = await file.arrayBuffer();
+  const cipher = await crypto.subtle.encrypt({name:"AES-GCM", iv}, cryptoKey, plain);
+
+  // 메타 전송
+  const meta = {
+    type:"file-meta",
+    name:file.name,
+    mime:file.type || "application/octet-stream",
+    size:file.size,
+    encSize:cipher.byteLength,
+    salt:b64(salt.buffer),
+    iv:b64(iv.buffer)
+  };
+  dc.send(JSON.stringify(meta));
+
+  // 청크 전송
+  const CHUNK = 64*1024;
+  let off = 0;
+  while(off < cipher.byteLength){
+    const end = Math.min(off+CHUNK, cipher.byteLength);
+    dc.send(cipher.slice(off, end));
+    off = end;
+    await new Promise(r=>setTimeout(r)); // 이벤트 루프 양보
+  }
+  dc.send(JSON.stringify({type:"file-end"}));
+  log(`📤 전송 완료: ${file.name} (${file.size} bytes)`);
+}
+
+sendBtn.onclick = async ()=>{
+  if(!dc || dc.readyState!=="open"){ alert("아직 데이터채널이 열리지 않았습니다."); return; }
+  if(!keyInput.value){ alert("암호키를 입력하세요."); return; }
+  const files = fileInput.files;
+  if(!files || files.length===0){ alert("파일을 선택하세요."); return; }
+  for(const f of files){ await encryptAndSendFile(f); }
+};
+</script>
+</body>
+</html>
